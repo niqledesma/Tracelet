@@ -1,0 +1,226 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#11111b">
+<title>Tracelet | File Search</title>
+<style>
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  background: #11111b;
+  color: #f2f0ff;
+}
+* { box-sizing: border-box; }
+body {
+  max-width: 760px;
+  margin: auto;
+  padding: 22px 16px;
+}
+header { border-bottom: 1px solid #383449; padding-bottom: 16px; }
+h1 { color: #c7a8ff; margin-bottom: 4px; }
+p, small { color: #b5b0c8; line-height: 1.5; }
+.panel, .result {
+  background: #1c1a29;
+  border: 1px solid #383449;
+  border-radius: 14px;
+  padding: 16px;
+  margin: 14px 0;
+}
+input, button {
+  width: 100%;
+  padding: 12px;
+  margin: 7px 0;
+  border: 1px solid #49435c;
+  border-radius: 9px;
+  background: #242033;
+  color: inherit;
+  font: inherit;
+}
+button {
+  background: #7652bd;
+  border: 0;
+  font-weight: 650;
+}
+button:disabled { opacity: .5; }
+input:focus-visible, button:focus-visible {
+  outline: 2px solid #c7a8ff;
+  outline-offset: 2px;
+}
+.result h3 { overflow-wrap: anywhere; }
+.snippet {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: .92rem;
+}
+mark { background: #e5d2ff; color: #20152e; }
+.tag { color: #d3b9ff; font-size: .85rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tracelet <span class="tag">v0.1</span></h1>
+  <p>Find information, not just filenames.</p>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>1. Select files</h2>
+    <p>
+      Select multiple text-based files, even if they have
+      unrelated filenames. Files are read in this browser.
+    </p>
+    <input id="files" type="file" multiple
+      accept=".txt,.md,.csv,.json,.html,.htm,.css,.js,.xml,.log">
+    <p id="fileStatus" aria-live="polite">No files selected.</p>
+  </section>
+
+  <section class="panel">
+    <h2>2. Search their contents</h2>
+    <input id="query" type="search"
+      placeholder="Try a word or phrase..."
+      aria-label="Search file contents">
+    <button id="searchBtn">Search files</button>
+    <p id="status" aria-live="polite">
+      Select files to begin.
+    </p>
+  </section>
+
+  <section>
+    <h2>Search results</h2>
+    <div id="results"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let indexedFiles = [];
+
+const supported = /\.(txt|md|csv|json|html?|css|js|xml|log)$/i;
+
+$("files").addEventListener("change", async () => {
+  const selected = Array.from($("files").files);
+  indexedFiles = [];
+  $("results").replaceChildren();
+  $("fileStatus").textContent = "Reading selected files...";
+
+  for (const file of selected) {
+    if (!supported.test(file.name)) continue;
+
+    try {
+      const text = await file.text();
+      indexedFiles.push({
+        name: file.name,
+        size: file.size,
+        text
+      });
+    } catch {
+      // Skip files that the browser cannot read.
+    }
+  }
+
+  $("fileStatus").textContent =
+    `${indexedFiles.length} readable text files loaded.`;
+
+  $("status").textContent =
+    "Enter a keyword and tap Search files.";
+});
+
+function addText(parent, tag, value, className) {
+  const el = document.createElement(tag);
+  el.textContent = value;
+  if (className) el.className = className;
+  parent.append(el);
+  return el;
+}
+
+function showSnippet(parent, text, start, end, query) {
+  const before = text.slice(Math.max(0, start - 90), start);
+  const match = text.slice(start, end);
+  const after = text.slice(end, end + 110);
+
+  parent.append(document.createTextNode(
+    (start > 90 ? "…" : "") + before
+  ));
+
+  const mark = document.createElement("mark");
+  mark.textContent = match;
+  parent.append(mark);
+
+  parent.append(document.createTextNode(
+    after + (end + 110 < text.length ? "…" : "")
+  ));
+}
+
+$("searchBtn").addEventListener("click", () => {
+  const query = $("query").value.trim();
+  const area = $("results");
+  area.replaceChildren();
+
+  if (!query) {
+    $("status").textContent = "Enter a keyword first.";
+    return;
+  }
+
+  if (!indexedFiles.length) {
+    $("status").textContent = "Select readable files first.";
+    return;
+  }
+
+  let total = 0;
+  const needle = query.toLocaleLowerCase();
+
+  for (const file of indexedFiles) {
+    const content = file.text.toLocaleLowerCase();
+    let pos = 0;
+    let matches = 0;
+    const positions = [];
+
+    while ((pos = content.indexOf(needle, pos)) !== -1) {
+      positions.push(pos);
+      matches++;
+      pos += needle.length;
+      if (positions.length >= 100) break;
+    }
+
+    if (!matches) continue;
+    total += matches;
+
+    const card = document.createElement("article");
+    card.className = "result";
+    addText(card, "h3", file.name);
+    addText(card, "p",
+      `${(file.size / 1024).toFixed(1)} KB · ${matches}` +
+      (matches === 100 ? "+ matches shown" : " matches"),
+      "tag"
+    );
+
+    for (const start of positions.slice(0, 3)) {
+      const snippet = document.createElement("p");
+      snippet.className = "snippet";
+      showSnippet(snippet, file.text, start,
+        start + query.length, query);
+      card.append(snippet);
+    }
+
+    if (matches > 3) {
+      addText(card, "small",
+        `${matches - 3} more matches in this file.`);
+    }
+
+    area.append(card);
+  }
+
+  $("status").textContent =
+    `${total} matches found across ${area.children.length} files.`;
+
+  if (!area.children.length) {
+    addText(area, "p",
+      "No matches found. Try a different keyword.");
+  }
+});
+</script>
+</body>
+</html>
